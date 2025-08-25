@@ -1,0 +1,17 @@
+tpch=> explain select count(*) from lineitem;
+                                                                                            QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2477172461938.06..2477172461938.07 rows=1 width=8)
+   ->  Seq Scan on lineitem  (cost=0.00..2477172453888.83 rows=3219690 width=0)
+         Filter: ((NOT (ANY (l_suppkey = (hashed SubPlan 6).col1))) OR ((l_shipdate >= '1995-01-01'::date) AND (l_shipdate <= '1995-01-31 00:00:00'::timestamp without time zone)))
+         SubPlan 6
+           ->  Seq Scan on supplier s  (cost=0.00..412769.00 rows=1 width=8)
+                 Filter: (((ANY (s_nationkey = (hashed SubPlan 5).col1)) OR (s_comment IS NULL) OR ((s_comment)::text !~~* '%blacklist%'::text)) AND ((s_comment)::text ~~* '%blacklist%'::text))
+                 SubPlan 5
+                   ->  Hash Join  (cost=20.73..42.18 rows=32 width=4)
+                         Hash Cond: (n.n_regionkey = r.r_regionkey)
+                         ->  Seq Scan on nation n  (cost=0.00..18.10 rows=810 width=8)
+                         ->  Hash  (cost=20.62..20.62 rows=8 width=4)
+                               ->  Seq Scan on region r  (cost=0.00..20.62 rows=8 width=4)
+                                     Filter: ((r_name)::text = ANY ('{EUROPE,ASIA}'::text[]))
+(13 rows)
