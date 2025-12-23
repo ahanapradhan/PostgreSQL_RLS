@@ -632,3 +632,131 @@ JOIN lineitem l ON l.l_orderkey = o.o_orderkey
 GROUP BY o.o_orderkey
 HAVING CORR(l.l_quantity, l.l_discount) > 0;
 
+/* =========================================================
+   PII ACCESS CONTROL POLICIES
+   ========================================================= */
+
+
+/* ---------------------------------------------------------
+   PII-1: Customer name and address visible only for
+          customers with at least one completed order
+   --------------------------------------------------------- */
+SELECT c.c_custkey, c.c_name, c.c_address
+FROM customer c
+WHERE EXISTS (
+    SELECT 1
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey
+      AND o.o_orderstatus = 'F'
+);
+
+
+/* ---------------------------------------------------------
+   PII-2: Customer phone number visible only for customers
+          whose total order value exceeds 50,000
+   --------------------------------------------------------- */
+SELECT c.c_custkey, c.c_phone
+FROM customer c
+JOIN orders o ON o.o_custkey = c.c_custkey
+JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+GROUP BY c.c_custkey, c.c_phone
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 50000;
+
+
+/* ---------------------------------------------------------
+   PII-3: Supplier contact details visible only if supplier
+          has shipped items within the last 180 days
+   --------------------------------------------------------- */
+SELECT DISTINCT s.s_suppkey, s.s_name, s.s_phone, s.s_address
+FROM supplier s
+JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '180' DAY;
+
+
+/* ---------------------------------------------------------
+   PII-4: Customer address visible only if customer belongs
+          to the same nation as the querying supplier
+   --------------------------------------------------------- */
+SELECT c.c_custkey, c.c_address
+FROM customer c
+JOIN nation n ON n.n_nationkey = c.c_nationkey
+WHERE n.n_nationkey = :current_supplier_nation;
+
+
+/* ---------------------------------------------------------
+   PII-5: Customer phone visible only for customers with
+          no returned lineitems
+   --------------------------------------------------------- */
+SELECT c.c_custkey, c.c_phone
+FROM customer c
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM orders o
+    JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_custkey = c.c_custkey
+      AND l.l_returnflag = 'R'
+);
+
+
+/* ---------------------------------------------------------
+   PII-6: Supplier address visible only to orders where
+          supplier directly participated
+   --------------------------------------------------------- */
+SELECT DISTINCT s.s_suppkey, s.s_address
+FROM supplier s
+JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+WHERE l.l_orderkey = :current_order;
+
+
+/* ---------------------------------------------------------
+   PII-7: Customer name masked unless customer has placed
+          at least 3 orders
+   --------------------------------------------------------- */
+SELECT
+    c.c_custkey,
+    CASE
+        WHEN COUNT(o.o_orderkey) >= 3 THEN c.c_name
+        ELSE 'REDACTED'
+    END AS c_name
+FROM customer c
+LEFT JOIN orders o ON o.o_custkey = c.c_custkey
+GROUP BY c.c_custkey, c.c_name;
+
+
+/* ---------------------------------------------------------
+   PII-8: Supplier phone number visible only if supplier
+          supplies parts from a single region
+   --------------------------------------------------------- */
+SELECT s.s_suppkey, s.s_phone
+FROM supplier s
+JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+JOIN part p ON p.p_partkey = ps.ps_partkey
+JOIN nation n ON n.n_nationkey = s.s_nationkey
+GROUP BY s.s_suppkey, s.s_phone
+HAVING COUNT(DISTINCT n.n_regionkey) = 1;
+
+
+/* ---------------------------------------------------------
+   PII-9: Customer address visible only if customer has
+          no orders marked as high priority
+   --------------------------------------------------------- */
+SELECT c.c_custkey, c.c_address
+FROM customer c
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey
+      AND o.o_orderpriority = '1-URGENT'
+);
+
+
+/* ---------------------------------------------------------
+   PII-10: Supplier name visible only if supplier has
+           fewer than 10 customers (low exposure rule)
+   --------------------------------------------------------- */
+SELECT s.s_suppkey, s.s_name
+FROM supplier s
+JOIN lineitem l ON l.l_suppkey = s.s_suppkey
+JOIN orders o ON o.o_orderkey = l.l_orderkey
+GROUP BY s.s_suppkey, s.s_name
+HAVING COUNT(DISTINCT o.o_custkey) < 10;
