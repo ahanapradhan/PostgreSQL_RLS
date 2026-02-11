@@ -1,9 +1,11 @@
 ------------------------------------------------------------
 -- CLEANUP
 ------------------------------------------------------------
+reset role;
 
 DROP TABLE IF EXISTS store_sales CASCADE;
 DROP TABLE IF EXISTS customer CASCADE;
+DROP TABLE IF EXISTS all_customer CASCADE;
 DROP TABLE IF EXISTS timing_runs CASCADE;
 DROP TABLE IF EXISTS timing_summary CASCADE;
 --DROP ROLE IF EXISTS rls_user;
@@ -32,6 +34,8 @@ CREATE TABLE store_sales (
 INSERT INTO customer
 SELECT i, 'Name_'||i, 'Last_'||i
 FROM generate_series(1,1000) AS s(i);
+
+CREATE TABLE all_customer AS (SELECT * from customer);
 
 -- 20,000 sales rows (random distribution)
 INSERT INTO store_sales
@@ -76,6 +80,8 @@ USING (
 
 GRANT SELECT ON customer TO rls_user;
 GRANT SELECT ON store_sales TO rls_user;
+GRANT SELECT ON all_customer TO rls_user;
+
 
 ------------------------------------------------------------
 -- TIMING TABLES
@@ -89,9 +95,7 @@ CREATE TABLE timing_runs (
 
 CREATE TABLE timing_summary (
     attack_name TEXT,
-    avg_ms NUMERIC,
-    min_ms NUMERIC,
-    max_ms NUMERIC
+    avg_ms NUMERIC
 );
 
 GRANT ALL ON timing_runs TO rls_user;
@@ -127,6 +131,23 @@ $$ LANGUAGE plpgsql SECURITY INVOKER;
 ------------------------------------------------------------
 -- PROBE DEFINITIONS
 ------------------------------------------------------------
+------------------------------------------------------------
+-- 0. BASELINE WITHOUT RLS
+------------------------------------------------------------
+CREATE OR REPLACE FUNCTION without_rls(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'without_rls',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM all_customer c
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
 
 ------------------------------------------------------------
 -- 1. BASELINE
@@ -152,7 +173,7 @@ CREATE OR REPLACE FUNCTION probe_amplification(run_id INT)
 RETURNS VOID AS $$
 BEGIN
     PERFORM record_timing(
-        'aggregation_amplification',
+        'join-filter',
         run_id,
         $q$
         SELECT DISTINCT c.*
@@ -172,7 +193,7 @@ CREATE OR REPLACE FUNCTION probe_group_collapse(run_id INT)
 RETURNS VOID AS $$
 BEGIN
     PERFORM record_timing(
-        'group_collapse',
+        'group_agg',
         run_id,
         $q$
         SELECT c.c_customer_sk, COUNT(*)
@@ -191,7 +212,7 @@ CREATE OR REPLACE FUNCTION probe_order_by(run_id INT)
 RETURNS VOID AS $$
 BEGIN
     PERFORM record_timing(
-        'order_by_leak',
+        'order_by',
         run_id,
         $q$
         SELECT DISTINCT c.*
@@ -233,6 +254,7 @@ DECLARE
     i INT;
 BEGIN
     FOR i IN 1..30 LOOP
+	    PERFORM without_rls(i);
         PERFORM probe_baseline(i);
         PERFORM probe_amplification(i);
         PERFORM probe_group_collapse(i);
@@ -252,29 +274,22 @@ $$;
 ------------------------------------------------------------
 
 INSERT INTO timing_summary
+(
 SELECT attack_name,
-       ROUND(AVG(exec_ms),4),
-       ROUND(MIN(exec_ms),4),
-       ROUND(MAX(exec_ms),4)
+       ROUND(AVG(exec_ms),4)
 FROM timing_runs
 GROUP BY attack_name
-ORDER BY attack_name;
+ORDER BY attack_name);
 
 ------------------------------------------------------------
 -- VIEW RESULTS
 ------------------------------------------------------------
+reset role;
 
-SELECT * FROM timing_summary;
+--SELECT * FROM timing_summary;
 
---------------------------------------------------------------
---- Office machine output 
---------------------------------------------------------------
-"aggregation_amplification"	6.0656	5.8520	6.6770
-"baseline_scan"	2.1223	2.0300	2.7460
-"group_collapse"	2.0845	1.9830	2.7580
-"order_by_leak"	1.9534	1.8770	2.1780
-"per_customer_oracle (1)"	1.7791	1.6980	2.2910
-"per_customer_oracle (2)"	1.7582	1.6730	2.1760
-"per_customer_oracle (3)"	1.7575	1.7130	1.9490
-"per_customer_oracle (4)"	1.7566	1.6880	2.2630
-"per_customer_oracle (5)"	1.7409	1.6780	1.9720
+WITH base_time as (select avg_ms from timing_summary where attack_name = 'without_rls')
+select attack_name, ROUND(avg_ms/(SELECT avg_ms FROM base_time), 4) as rel_avg
+from timing_summary
+where attack_name <> 'without_rls';
+
