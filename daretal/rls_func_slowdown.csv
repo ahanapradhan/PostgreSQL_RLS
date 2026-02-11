@@ -1,0 +1,19 @@
+attack,avg_ms,min_ms,max_ms
+Baseline scan,0.0494,0.032,0.273
+Aggregation amplification,0.0462,0.038,0.230
+Group collapse,0.0442,0.033,0.156
+Order-by leak,0.0352,0.030,0.097
+Per-customer oracle (1),0.0230,0.019,0.078
+Per-customer oracle (2),0.0190,0.018,0.020
+Per-customer oracle (3),0.0242,0.018,0.093
+Per-customer oracle (4),0.0225,0.017,0.069
+Per-customer oracle (5),0.0232,0.017,0.076
+
+
+
+
+
+
+
+
+
