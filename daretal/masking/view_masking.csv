@@ -1,0 +1,5 @@
+attack_name,rel_avg
+scan,10.2728
+group_agg,9.3321
+join-filter,13.9131
+order_by,9.3873
