@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS customer CASCADE;
 DROP TABLE IF EXISTS all_customer CASCADE;
 DROP TABLE IF EXISTS timing_runs CASCADE;
 DROP TABLE IF EXISTS timing_summary CASCADE;
+DROP VIEW IF EXISTS customer_view CASCADE;
 --DROP ROLE IF EXISTS rls_user;
 
 ------------------------------------------------------------
@@ -30,19 +31,27 @@ CREATE TABLE store_sales (
 -- DATA POPULATION
 ------------------------------------------------------------
 
--- 1000 customers
+-- 100000 customers
 INSERT INTO customer
 SELECT i, 'Name_'||i, 'Last_'||i
-FROM generate_series(1,1000) AS s(i);
+FROM generate_series(1,100000) AS s(i);
 
 CREATE TABLE all_customer AS (SELECT * from customer);
 
--- 20,000 sales rows (random distribution)
+CREATE VIEW customer_view AS
+SELECT * FROM all_customer WHERE c_customer_sk IN (
+        SELECT ss_customer_sk
+        FROM store_sales
+        WHERE ss_net_paid > 1000
+    );
+
+
+-- 200,0000 sales rows (random distribution)
 INSERT INTO store_sales
 SELECT CURRENT_DATE,
-       (random()*999 + 1)::INT,
-       (random()*2000)::NUMERIC
-FROM generate_series(1,20000);
+       (random()*99999 + 1)::INT,
+       (random()*200000)::NUMERIC
+FROM generate_series(1,200000);
 
 ------------------------------------------------------------
 -- INDEXES (critical for optimizer behavior)
@@ -69,6 +78,7 @@ USING (
     )
 );
 
+
 ------------------------------------------------------------
 -- CREATE RLS USER
 ------------------------------------------------------------
@@ -81,6 +91,7 @@ USING (
 GRANT SELECT ON customer TO rls_user;
 GRANT SELECT ON store_sales TO rls_user;
 GRANT SELECT ON all_customer TO rls_user;
+GRANT SELECT ON customer_view TO rls_user;
 
 
 ------------------------------------------------------------
@@ -134,11 +145,11 @@ $$ LANGUAGE plpgsql SECURITY INVOKER;
 ------------------------------------------------------------
 -- 0. BASELINE WITHOUT RLS
 ------------------------------------------------------------
-CREATE OR REPLACE FUNCTION without_rls(run_id INT)
+CREATE OR REPLACE FUNCTION probe_baseline_without_rls(run_id INT)
 RETURNS VOID AS $$
 BEGIN
     PERFORM record_timing(
-        'without_rls',
+        'scan_without_rls',
         run_id,
         $q$
         SELECT DISTINCT c.*
@@ -166,6 +177,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;
 
+CREATE OR REPLACE FUNCTION probe_baseline_view(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'scan_view',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM customer_view c
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
 ------------------------------------------------------------
 -- 2. AGGREGATION AMPLIFICATION
 ------------------------------------------------------------
@@ -178,6 +203,40 @@ BEGIN
         $q$
         SELECT DISTINCT c.*
         FROM customer c
+        JOIN store_sales ss
+          ON c.c_customer_sk = ss.ss_customer_sk
+        WHERE ss.ss_net_paid < 1500
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION probe_amplification_view(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'join-filter_view',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM customer_view c
+        JOIN store_sales ss
+          ON c.c_customer_sk = ss.ss_customer_sk
+        WHERE ss.ss_net_paid < 1500
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION probe_amplification_without_rls(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'join-filter_without_rls',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM all_customer c
         JOIN store_sales ss
           ON c.c_customer_sk = ss.ss_customer_sk
         WHERE ss.ss_net_paid < 1500
@@ -205,6 +264,38 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;
 
+CREATE OR REPLACE FUNCTION probe_group_collapse_view(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'group_agg_view',
+        run_id,
+        $q$
+        SELECT c.c_customer_sk, COUNT(*)
+        FROM customer_view c
+        GROUP BY c.c_customer_sk
+        HAVING COUNT(*) > 0
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION probe_group_collapse_without_rls(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'group_agg_without_rls',
+        run_id,
+        $q$
+        SELECT c.c_customer_sk, COUNT(*)
+        FROM all_customer c
+        GROUP BY c.c_customer_sk
+        HAVING COUNT(*) > 0
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
 ------------------------------------------------------------
 -- 4. ORDER BY LEAK
 ------------------------------------------------------------
@@ -217,6 +308,36 @@ BEGIN
         $q$
         SELECT DISTINCT c.*
         FROM customer c
+        ORDER BY c.c_customer_sk
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION probe_order_by_view(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'order_by_view',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM customer_view c
+        ORDER BY c.c_customer_sk
+        $q$
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION probe_order_by_without_rls(run_id INT)
+RETURNS VOID AS $$
+BEGIN
+    PERFORM record_timing(
+        'order_by_without_rls',
+        run_id,
+        $q$
+        SELECT DISTINCT c.*
+        FROM all_customer c
         ORDER BY c.c_customer_sk
         $q$
     );
@@ -254,17 +375,24 @@ DECLARE
     i INT;
 BEGIN
     FOR i IN 1..30 LOOP
-	    PERFORM without_rls(i);
+	    PERFORM probe_baseline_without_rls(i);
         PERFORM probe_baseline(i);
+		        PERFORM probe_baseline_view(i);
         PERFORM probe_amplification(i);
         PERFORM probe_group_collapse(i);
         PERFORM probe_order_by(i);
+		PERFORM probe_amplification_without_rls(i);
+        PERFORM probe_group_collapse_without_rls(i);
+        PERFORM probe_order_by_without_rls(i);
+		PERFORM probe_amplification_view(i);
+        PERFORM probe_group_collapse_view(i);
+        PERFORM probe_order_by_view(i);
 
-        PERFORM probe_per_customer(i,1);
-        PERFORM probe_per_customer(i,2);
-        PERFORM probe_per_customer(i,3);
-        PERFORM probe_per_customer(i,4);
-        PERFORM probe_per_customer(i,5);
+       -- PERFORM probe_per_customer(i,1);
+      --  PERFORM probe_per_customer(i,2);
+      --  PERFORM probe_per_customer(i,3);
+      --  PERFORM probe_per_customer(i,4);
+      --  PERFORM probe_per_customer(i,5);
     END LOOP;
 END;
 $$;
@@ -286,10 +414,6 @@ ORDER BY attack_name);
 ------------------------------------------------------------
 reset role;
 
---SELECT * FROM timing_summary;
+SELECT * FROM timing_summary;
 
-WITH base_time as (select avg_ms from timing_summary where attack_name = 'without_rls')
-select attack_name, ROUND(avg_ms/(SELECT avg_ms FROM base_time), 4) as rel_avg
-from timing_summary
-where attack_name <> 'without_rls';
 
