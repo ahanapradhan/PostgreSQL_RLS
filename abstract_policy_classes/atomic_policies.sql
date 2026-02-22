@@ -1,7 +1,7 @@
 -- P1: Attribute/Join predicate
 --------------------------------
 /* ---------------------------------------------------------
-   Supplier visible only if supplier
+   P1a: Supplier visible only if supplier
           has shipped items within a time frame
    --------------------------------------------------------- */
 SELECT s.*
@@ -12,7 +12,7 @@ WHERE l.l_shipdate >= DATE '1995-05-05' - INTERVAL '180' DAY;
 
 
 /* ---------------------------------------------------------
-   Lineitem visible only if supplier and customer
+  P1b:  Lineitem visible only if supplier and customer
    belong to the same nation and order priority is high
    --------------------------------------------------------- */
 SELECT l.*
@@ -27,7 +27,7 @@ WHERE s.s_nationkey = c.c_nationkey
   AND o.o_orderpriority IN ('1-URGENT', '2-HIGH');
 
 /* ---------------------------------------------------------
-  Lineitem visible only if supplier and customer
+ P1c:  Lineitem visible only if supplier and customer
         are from different nations but same region
    --------------------------------------------------------- */
 SELECT l.*
@@ -43,7 +43,7 @@ WHERE ns.n_nationkey <> nc.n_nationkey
 -- P2: Existence/Semi-Join
 --------------------------------
 /* ---------------------------------------------------------
-   Customer visible only if at least one completed order
+P2a:   Customer visible only if at least one completed order
    --------------------------------------------------------- */
 SELECT c.*
 FROM customer c
@@ -55,7 +55,7 @@ WHERE EXISTS (
 );
 
 /* ---------------------------------------------------------
-   Orders visible only if they contain at least one
+P2b:   Orders visible only if they contain at least one
    late-shipped lineitem with discount > 5%
    --------------------------------------------------------- */
 SELECT o.*
@@ -70,7 +70,7 @@ WHERE EXISTS (
 
 
 /* ---------------------------------------------------------
-   Customer visible only if they have at least one order
+P2c:   Customer visible only if they have at least one order
    containing a lineitem supplied by a supplier from
    a different nation but same region as the customer
    --------------------------------------------------------- */
@@ -97,7 +97,7 @@ WHERE EXISTS (
 -- P3: Universal/Anti-existence
 --------------------------------
 /* ---------------------------------------------------------
-   Part visible only if it has never been ordered
+P3a:   Part visible only if it has never been ordered
         in quantities greater than 200
    --------------------------------------------------------- */
 SELECT p.*
@@ -110,7 +110,7 @@ WHERE NOT EXISTS (
 );
 
 /* ---------------------------------------------------------
-   Supplier visible only if they have never supplied
+P3b:   Supplier visible only if they have never supplied
         a part with retail price below 500
    --------------------------------------------------------- */
 SELECT s.*
@@ -124,7 +124,7 @@ WHERE NOT EXISTS (
 );
 
 /* ---------------------------------------------------------
-   Customer visible only if all their orders have
+P3c:   Customer visible only if all their orders have
         at least one lineitem shipped via TRUCK or MAIL
    --------------------------------------------------------- */
 SELECT c.*
@@ -144,7 +144,7 @@ WHERE NOT EXISTS (
 -- P4: Group/Agg
 --------------------------------
 /* ---------------------------------------------------------
-   Customer visible only if total account balance > 0
+P4a:   Customer visible only if total account balance > 0
    --------------------------------------------------------- */
 SELECT c.*
 FROM customer c
@@ -159,7 +159,7 @@ GROUP BY c.c_custkey,
 HAVING SUM(c.c_acctbal) > 0;
 
 /* ---------------------------------------------------------
-   Orders visible only if total revenue > 100000
+P4b:   Orders visible only if total revenue > 100000
    --------------------------------------------------------- */
 SELECT o.*
 FROM orders o
@@ -177,7 +177,7 @@ GROUP BY o.o_orderkey,
 HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000;
 
 /* ---------------------------------------------------------
-   Customer visible only if total revenue from suppliers
+P4c:   Customer visible only if total revenue from suppliers
    in same region exceeds 200000
    --------------------------------------------------------- */
 SELECT c.*
@@ -211,7 +211,7 @@ HAVING SUM(
 -- P5: Statistical
 --------------------------------
 /* ---------------------------------------------------------
-   Lineitem visible only if its order date is closer
+P5a:   Lineitem visible only if its order date is closer
         to ship date than to receipt date
    --------------------------------------------------------- */
 SELECT l.*
@@ -223,7 +223,7 @@ WHERE ABS(o.o_orderdate - l.l_shipdate)
 
 
 /* ---------------------------------------------------------
-  Lineitem visible only if its shipping delay
+P5b:  Lineitem visible only if its shipping delay
         exceeds the average delay for that ship mode
    --------------------------------------------------------- */
 SELECT l.*
@@ -238,7 +238,7 @@ WHERE (l.l_receiptdate - l.l_shipdate) >
 
 
 /* ---------------------------------------------------------
-   Lineitem visible only if its supplier’s nation
+P5c:  Lineitem visible only if its supplier’s nation
         has higher total export value than import value
    --------------------------------------------------------- */
 SELECT l.*
