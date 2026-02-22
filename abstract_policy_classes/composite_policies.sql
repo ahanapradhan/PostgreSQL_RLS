@@ -58,3 +58,47 @@ AND EXISTS (
       AND ns.n_regionkey = nc.n_regionkey
       AND ns.n_nationkey <> nc.n_nationkey
 );
+
+-- NOT
+-- NOT P5a
+/*--------
+Lineitems with no order
+Lineitems whose order violates the closeness condition
+-------------------*/
+SELECT l.*
+FROM lineitem l
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM orders o
+    WHERE o.o_orderkey = l.l_orderkey
+      AND ABS(o.o_orderdate - l.l_shipdate)
+          < ABS(o.o_orderdate - l.l_receiptdate)
+);
+
+--- NOT
+-- NOT P4b
+/* --
+Orders with no lineitems
+Orders with lineitems but total revenue <= 100000
+------------------------------------------------*/
+SELECT o.*
+FROM orders o
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_orderkey = o.o_orderkey
+)
+OR
+(
+    EXISTS (
+        SELECT 1
+        FROM lineitem l
+        WHERE l.l_orderkey = o.o_orderkey
+    )
+    AND
+    (
+        SELECT SUM(l2.l_extendedprice * (1 - l2.l_discount))
+        FROM lineitem l2
+        WHERE l2.l_orderkey = o.o_orderkey
+    ) <= 100000
+);
