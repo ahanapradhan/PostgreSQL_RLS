@@ -1,6 +1,5 @@
 -- P1: Attribute/Join predicate
 --------------------------------
--- easy
 /* ---------------------------------------------------------
    Supplier visible only if supplier
           has shipped items within a time frame
@@ -11,7 +10,7 @@ JOIN lineitem l ON l.l_suppkey = s.s_suppkey
 WHERE l.l_shipdate >= DATE '1995-05-05' - INTERVAL '180' DAY;
 
 
--- medium
+
 /* ---------------------------------------------------------
    Lineitem visible only if supplier and customer
    belong to the same nation and order priority is high
@@ -27,7 +26,6 @@ JOIN supplier s
 WHERE s.s_nationkey = c.c_nationkey
   AND o.o_orderpriority IN ('1-URGENT', '2-HIGH');
 
--- hard
 /* ---------------------------------------------------------
   Lineitem visible only if supplier and customer
         are from different nations but same region
@@ -44,7 +42,6 @@ WHERE ns.n_nationkey <> nc.n_nationkey
 ----================================
 -- P2: Existence/Semi-Join
 --------------------------------
--- easy
 /* ---------------------------------------------------------
    Customer visible only if at least one completed order
    --------------------------------------------------------- */
@@ -57,7 +54,6 @@ WHERE EXISTS (
       AND o.o_orderstatus = 'F'
 );
 
--- medium
 /* ---------------------------------------------------------
    Orders visible only if they contain at least one
    late-shipped lineitem with discount > 5%
@@ -72,7 +68,7 @@ WHERE EXISTS (
       AND l.l_discount > 0.05
 );
 
--- hard
+
 /* ---------------------------------------------------------
    Customer visible only if they have at least one order
    containing a lineitem supplied by a supplier from
@@ -100,7 +96,6 @@ WHERE EXISTS (
 ----================================
 -- P3: Universal/Anti-existence
 --------------------------------
--- easy
 /* ---------------------------------------------------------
    Part visible only if it has never been ordered
         in quantities greater than 200
@@ -114,7 +109,6 @@ WHERE NOT EXISTS (
       AND l.l_quantity > 200
 );
 
--- medium
 /* ---------------------------------------------------------
    Supplier visible only if they have never supplied
         a part with retail price below 500
@@ -129,7 +123,6 @@ WHERE NOT EXISTS (
       AND p.p_retailprice < 500
 );
 
--- hard
 /* ---------------------------------------------------------
    Customer visible only if all their orders have
         at least one lineitem shipped via TRUCK or MAIL
@@ -150,57 +143,73 @@ WHERE NOT EXISTS (
 ----================================
 -- P4: Group/Agg
 --------------------------------
--- easy
 /* ---------------------------------------------------------
-   Supplier visible only if they supply parts from
-        at least 3 different part types
+   Customer visible only if total account balance > 0
    --------------------------------------------------------- */
-SELECT s.*
-FROM supplier s
-JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
-JOIN part p ON p.p_partkey = ps.ps_partkey
-GROUP BY s.s_suppkey
-HAVING COUNT(DISTINCT p.p_type) >= 3;
+SELECT c.*
+FROM customer c
+GROUP BY c.c_custkey,
+         c.c_name,
+         c.c_address,
+         c.c_nationkey,
+         c.c_phone,
+         c.c_acctbal,
+         c.c_mktsegment,
+         c.c_comment
+HAVING SUM(c.c_acctbal) > 0;
 
--- medium
 /* ---------------------------------------------------------
-   Orders visible only if the maximum lineitem quantity
-        in the order is at most twice the minimum quantity
+   Orders visible only if total revenue > 100000
    --------------------------------------------------------- */
 SELECT o.*
 FROM orders o
-JOIN lineitem l ON l.l_orderkey = o.o_orderkey
-GROUP BY o.o_orderkey
-HAVING MAX(l.l_quantity) <= 2 * MIN(l.l_quantity);
-
-/* ---------------------------------------------------------
-Orders visible only if total order revenue exceeds 100,000
-   --------------------------------------------------------- */
--- medium
-SELECT o.*
-FROM orders o
-JOIN lineitem l ON l.l_orderkey = o.o_orderkey
-GROUP BY o.o_orderkey
+JOIN lineitem l
+     ON l.l_orderkey = o.o_orderkey
+GROUP BY o.o_orderkey,
+         o.o_custkey,
+         o.o_orderstatus,
+         o.o_totalprice,
+         o.o_orderdate,
+         o.o_orderpriority,
+         o.o_clerk,
+         o.o_shippriority,
+         o.o_comment
 HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 100000;
 
 /* ---------------------------------------------------------
-   Supplier visible if they have fulfilled orders
-        for customers in at least 2 regions
+   Customer visible only if total revenue from suppliers
+   in same region exceeds 200000
    --------------------------------------------------------- */
--- hard
-SELECT s.*
-FROM supplier s
-JOIN lineitem l ON l.l_suppkey = s.s_suppkey
-JOIN orders o ON o.o_orderkey = l.l_orderkey
-JOIN customer c ON c.c_custkey = o.o_custkey
-JOIN nation n ON n.n_nationkey = c.c_nationkey
-JOIN region r ON r.r_regionkey = n.n_regionkey
-GROUP BY s.s_suppkey
-HAVING COUNT(DISTINCT r.r_regionkey) >= 2;
+SELECT c.*
+FROM customer c
+JOIN orders o
+     ON o.o_custkey = c.c_custkey
+JOIN lineitem l
+     ON l.l_orderkey = o.o_orderkey
+JOIN supplier s
+     ON s.s_suppkey = l.l_suppkey
+JOIN nation ns
+     ON ns.n_nationkey = s.s_nationkey
+JOIN nation nc
+     ON nc.n_nationkey = c.c_nationkey
+GROUP BY c.c_custkey,
+         c.c_name,
+         c.c_address,
+         c.c_nationkey,
+         c.c_phone,
+         c.c_acctbal,
+         c.c_mktsegment,
+         c.c_comment
+HAVING SUM(
+        CASE 
+           WHEN ns.n_regionkey = nc.n_regionkey
+           THEN l.l_extendedprice * (1 - l.l_discount)
+           ELSE 0
+        END
+       ) > 200000;
 ----================================
 -- P5: Statistical
 --------------------------------
--- easy
 /* ---------------------------------------------------------
    Lineitem visible only if its order date is closer
         to ship date than to receipt date
@@ -212,12 +221,11 @@ WHERE ABS(o.o_orderdate - l.l_shipdate)
     < ABS(o.o_orderdate - l.l_receiptdate);
 
 
--- medium
+
 /* ---------------------------------------------------------
   Lineitem visible only if its shipping delay
         exceeds the average delay for that ship mode
    --------------------------------------------------------- */
--- hard
 SELECT l.*
 FROM lineitem l
 WHERE (l.l_receiptdate - l.l_shipdate) >
@@ -228,7 +236,7 @@ WHERE (l.l_receiptdate - l.l_shipdate) >
       );
 
 
--- hard
+
 /* ---------------------------------------------------------
    Lineitem visible only if its supplier’s nation
         has higher total export value than import value
